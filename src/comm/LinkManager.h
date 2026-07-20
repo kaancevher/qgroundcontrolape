@@ -158,6 +158,9 @@ private:
     void                _addMAVLinkForwardingLink   (void);
     bool                _isSerialPortConnected      (void);
     void                _createDynamicForwardLink   (const char* linkName, QString hostName);
+#if defined(__android__) && !defined(NO_SERIAL_LINK)
+    void                _ensureH12Link              (void);
+#endif
 
 #ifndef NO_SERIAL_LINK
     bool                _portAlreadyConnected       (const QString& portName);
@@ -175,6 +178,10 @@ private:
 
     QList<SharedLinkInterfacePtr>       _rgLinks;
     QList<SharedLinkConfigurationPtr>   _rgLinkConfigs;
+#if defined(__android__) && !defined(NO_SERIAL_LINK)
+    SharedLinkConfigurationPtr          _h12Configuration;
+    bool                                _h12EnsureQueued;
+#endif
     QString                             _autoConnectRTKPort;
     QmlObjectListModel                  _qmlConfigurations;
 

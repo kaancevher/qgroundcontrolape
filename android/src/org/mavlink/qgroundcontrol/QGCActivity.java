@@ -204,6 +204,11 @@ public class QGCActivity extends QtActivity
     {
         super.onCreate(savedInstanceState);
         nativeInit();
+        try {
+            SkydroidRCBridge.start(this);
+        } catch (Throwable error) {
+            Log.e(TAG, "RCSDK bridge start failed", error);
+        }
         PowerManager pm = (PowerManager)_instance.getSystemService(Context.POWER_SERVICE);
         _wakeLock = pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK, "QGroundControl");
         if(_wakeLock != null) {
@@ -271,6 +276,11 @@ public class QGCActivity extends QtActivity
     @Override
     protected void onDestroy()
     {
+        try {
+            SkydroidRCBridge.stop();
+        } catch (Throwable error) {
+            Log.e(TAG, "RCSDK bridge stop failed", error);
+        }
         if (probeAccessoriesTimer != null) {
             probeAccessoriesTimer.cancel();
         }

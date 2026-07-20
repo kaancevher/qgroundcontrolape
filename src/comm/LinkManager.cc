@@ -24,6 +24,11 @@
 #include "TCPLink.h"
 #include "SettingsManager.h"
 #include "LogReplayLink.h"
+
+#ifdef __android__
+#include "H12Link.h"
+#endif
+
 #ifdef QGC_ENABLE_BLUETOOTH
 #include "BluetoothLink.h"
 #endif
@@ -66,6 +71,9 @@ LinkManager::LinkManager(QGCApplication* app, QGCToolbox* toolbox)
     , _mavlinkChannelsUsedBitMask(1)    // We never use channel 0 to avoid sequence numbering problems
     , _autoConnectSettings(nullptr)
     , _mavlinkProtocol(nullptr)
+    #if defined(__android__) && !defined(NO_SERIAL_LINK)
+    , _h12EnsureQueued(false)
+    #endif
     #ifndef __mobile__
     #ifndef NO_SERIAL_LINK
     , _nmeaPort(nullptr)
@@ -112,10 +120,52 @@ bool LinkManager::createConnectedLink(SharedLinkConfigurationPtr& config, bool i
 {
     SharedLinkInterfacePtr link = nullptr;
 
+#if defined(__android__) && !defined(NO_SERIAL_LINK)
+    SerialConfiguration* requestedSerialConfig =
+            qobject_cast<SerialConfiguration*>(config.get());
+
+    if (requestedSerialConfig
+            && requestedSerialConfig->portName()
+                    == H12Link::configurationPortName()) {
+        for (const SharedLinkInterfacePtr& existingLink: _rgLinks) {
+            SerialConfiguration* existingSerialConfig =
+                    qobject_cast<SerialConfiguration*>(
+                            existingLink->linkConfiguration().get());
+
+            if (existingSerialConfig
+                    && existingSerialConfig->portName()
+                            == H12Link::configurationPortName()) {
+                qCWarning(LinkManagerLog)
+                        << "Refusing duplicate Skydroid H12 RCSDK link";
+                return false;
+            }
+        }
+    }
+#endif
+
     switch(config->type()) {
 #ifndef NO_SERIAL_LINK
     case LinkConfiguration::TypeSerial:
-        link = std::make_shared<SerialLink>(config, isPX4Flow);
+#ifdef __android__
+        {
+            SerialConfiguration* serialConfig =
+                    qobject_cast<SerialConfiguration*>(config.get());
+
+            if (serialConfig
+                    && serialConfig->portName()
+                            == H12Link::configurationPortName()) {
+                link = std::make_shared<H12Link>(config);
+            } else {
+                link = std::make_shared<SerialLink>(
+                        config,
+                        isPX4Flow);
+            }
+        }
+#else
+        link = std::make_shared<SerialLink>(
+                config,
+                isPX4Flow);
+#endif
         break;
 #else
     Q_UNUSED(isPX4Flow)
@@ -214,19 +264,51 @@ void LinkManager::_linkDisconnected(void)
         return;
     }
 
+#if defined(__android__) && !defined(NO_SERIAL_LINK)
+    bool wasH12Link = false;
+    SerialConfiguration* disconnectedSerialConfig =
+            qobject_cast<SerialConfiguration*>(
+                    link->linkConfiguration().get());
+
+    if (disconnectedSerialConfig) {
+        wasH12Link =
+                disconnectedSerialConfig->portName()
+                        == H12Link::configurationPortName();
+    }
+#endif
+
     disconnect(link, &LinkInterface::communicationError,  _app,                &QGCApplication::criticalMessageBoxOnMainThread);
     disconnect(link, &LinkInterface::bytesReceived,       _mavlinkProtocol,    &MAVLinkProtocol::receiveBytes);
     disconnect(link, &LinkInterface::bytesSent,           _mavlinkProtocol,    &MAVLinkProtocol::logSentBytes);
     disconnect(link, &LinkInterface::disconnected,        this,                &LinkManager::_linkDisconnected);
 
     link->_freeMavlinkChannel();
+    bool linkRemoved = false;
+
     for (int i=0; i<_rgLinks.count(); i++) {
         if (_rgLinks[i].get() == link) {
             qCDebug(LinkManagerLog) << "LinkManager::_linkDisconnected" << _rgLinks[i]->linkConfiguration()->name() << _rgLinks[i].use_count();
             _rgLinks.removeAt(i);
-            return;
+            linkRemoved = true;
+            break;
         }
     }
+
+#if defined(__android__) && !defined(NO_SERIAL_LINK)
+    if (linkRemoved
+            && wasH12Link
+            && !_connectionsSuspended
+            && !_h12EnsureQueued) {
+        _h12EnsureQueued = true;
+
+        QTimer::singleShot(0, this, [this]() {
+            _h12EnsureQueued = false;
+            _ensureH12Link();
+        });
+    }
+#else
+    Q_UNUSED(linkRemoved)
+#endif
 }
 
 SharedLinkInterfacePtr LinkManager::sharedLinkInterfacePointerForLink(LinkInterface* link, bool ignoreNull)
@@ -858,13 +940,61 @@ SharedLinkConfigurationPtr LinkManager::addConfiguration(LinkConfiguration* conf
     return _rgLinkConfigs.last();
 }
 
+#if defined(__android__) && !defined(NO_SERIAL_LINK)
+void LinkManager::_ensureH12Link(void)
+{
+    if (_connectionsSuspended) {
+        return;
+    }
+
+    for (const SharedLinkInterfacePtr& existingLink: _rgLinks) {
+        SerialConfiguration* serialConfig =
+                qobject_cast<SerialConfiguration*>(
+                        existingLink->linkConfiguration().get());
+
+        if (serialConfig
+                && serialConfig->portName()
+                        == H12Link::configurationPortName()) {
+            return;
+        }
+    }
+
+    if (!_h12Configuration) {
+        SerialConfiguration* h12Config =
+                new SerialConfiguration(
+                        tr("Skydroid H12 RCSDK"));
+
+        h12Config->setPortName(
+                H12Link::configurationPortName());
+        h12Config->setDynamic(true);
+        h12Config->setAutoConnect(true);
+
+        _h12Configuration =
+                SharedLinkConfigurationPtr(
+                h12Config);
+    }
+
+    if (!createConnectedLink(_h12Configuration)) {
+        qCWarning(LinkManagerLog)
+                << "Could not create Skydroid H12 RCSDK link";
+    }
+}
+#endif
+
 void LinkManager::startAutoConnectedLinks(void)
 {
+#if defined(__android__) && !defined(NO_SERIAL_LINK)
+    _ensureH12Link();
+#endif
+
     SharedLinkConfigurationPtr conf;
+
     for(int i = 0; i < _rgLinkConfigs.count(); i++) {
         conf = _rgLinkConfigs[i];
-        if (conf->isAutoConnect())
+
+        if (conf->isAutoConnect()) {
             createConnectedLink(conf);
+        }
     }
 }
 

@@ -90,6 +90,8 @@ int WindowsCrtReportHook(int reportType, char* message, int* returnValue)
 #include "qserialport.h"
 #endif
 
+#include "H12Link.h"
+
 static jobject _class_loader = nullptr;
 static jobject _context = nullptr;
 
@@ -178,6 +180,10 @@ jint JNI_OnLoad(JavaVM* vm, void* reserved)
     }
 
     setNativeMethods();
+
+    if (!H12Link::setNativeMethods()) {
+        return JNI_ERR;
+    }
 
 #if defined(QGC_GST_STREAMING)
     // Tell the androidmedia plugin about the Java VM

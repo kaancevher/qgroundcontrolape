@@ -1390,6 +1390,12 @@ contains (CONFIG, DISABLE_VIDEOSTREAMING) {
 # Android
 
 AndroidBuild {
+    HEADERS += \
+        src/comm/H12Link.h
+
+    SOURCES += \
+        src/comm/H12Link.cc
+
     contains (CONFIG, DISABLE_BUILTIN_ANDROID) {
         message("Skipping builtin support for Android")
     } else {
