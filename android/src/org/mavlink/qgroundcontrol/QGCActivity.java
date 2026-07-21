@@ -209,6 +209,11 @@ public class QGCActivity extends QtActivity
         } catch (Throwable error) {
             Log.e(TAG, "RCSDK bridge start failed", error);
         }
+        try {
+            SkydroidFPVBridge.start(this);
+        } catch (Throwable error) {
+            Log.e(TAG, "H12 video bridge start failed", error);
+        }
         PowerManager pm = (PowerManager)_instance.getSystemService(Context.POWER_SERVICE);
         _wakeLock = pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK, "QGroundControl");
         if(_wakeLock != null) {
@@ -276,6 +281,11 @@ public class QGCActivity extends QtActivity
     @Override
     protected void onDestroy()
     {
+        try {
+            SkydroidFPVBridge.stop();
+        } catch (Throwable error) {
+            Log.e(TAG, "H12 video bridge stop failed", error);
+        }
         try {
             SkydroidRCBridge.stop();
         } catch (Throwable error) {
